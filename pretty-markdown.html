@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Markdown Reader</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- marked.js — GFM parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+
+  <!-- highlight.js core + theme -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-light.min.css" id="hljs-light-theme" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css" id="hljs-dark-theme" disabled />
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
+    :root {
+      --ink:           #1C1410;
+      --ink-secondary: #5C4F46;
+      --paper:         #F7F3EE;
+      --paper-raised:  #EDE8E1;
+      --border:        #DDD6CC;
+      --muted:         #9C8E82;
+      --accent:        #D40119;
+      --accent-hover:  #AA0114;
+      --code-bg:       #F0EBE4;
+      --font-serif:    'Lora', Georgia, serif;
+      --font-ui:       'Inter', system-ui, sans-serif;
+      --font-mono:     'JetBrains Mono', 'Courier New', monospace;
+      --content-width: 72ch;
+      --radius:        4px;
+      --transition:    150ms ease;
+    }
+
+    [data-theme="dark"] {
+      --ink:           #EDE4D8;
+      --ink-secondary: #A89880;
+      --paper:         #1A1510;
+      --paper-raised:  #221D16;
+      --border:        #35291E;
+      --muted:         #7A6E64;
+      --accent:        #E8001B;
+      --accent-hover:  #FF1A30;
+      --code-bg:       #2A231A;
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      font-size: 18px;
+      scroll-behavior: smooth;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    /* ─── Chrome ────────────────────────────────────────────────── */
+    .chrome {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 52px;
+      background: var(--paper);
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition), border-color var(--transition);
+    }
+
+    .chrome-wordmark {
+      font-family: var(--font-ui);
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    .chrome-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    /* Upload button in chrome (appears after first file load) */
+    .chrome-upload-btn {
+      display: none;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--ink-secondary);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      transition: color var(--transition), border-color var(--transition);
+    }
+    .chrome-upload-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .chrome-upload-btn.visible { display: flex; }
+
+    /* Theme toggle */
+    .theme-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.25rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      transition: color var(--transition);
+    }
+    .theme-toggle:hover { color: var(--ink); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+    .icon-moon { display: block; }
+    .icon-sun  { display: none; }
+    [data-theme="dark"] .icon-moon { display: none; }
+    [data-theme="dark"] .icon-sun  { display: block; }
+
+    /* ─── Main Layout ───────────────────────────────────────────── */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 3rem 2rem 6rem;
+    }
+
+    /* ─── Drop Zone (empty state) ───────────────────────────────── */
+    #drop-zone {
+      width: 100%;
+      max-width: 540px;
+      margin: auto;
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 4rem 2.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color var(--transition), background var(--transition);
+      outline: none;
+    }
+
+    #drop-zone:hover,
+    #drop-zone:focus-visible {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 4%, var(--paper));
+    }
+
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, var(--paper));
+    }
+
+    .drop-icon {
+      margin: 0 auto 1.25rem;
+      width: 44px;
+      height: 44px;
+      color: var(--muted);
+      transition: color var(--transition);
+    }
+    #drop-zone:hover .drop-icon,
+    #drop-zone.drag-over .drop-icon { color: var(--accent); }
+
+    .drop-label {
+      font-family: var(--font-serif);
+      font-size: 1.15rem;
+      font-weight: 500;
+      color: var(--ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .drop-sub {
+      font-family: var(--font-ui);
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .drop-sub strong {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    #file-input { display: none; }
+
+    /* ─── Error State ───────────────────────────────────────────── */
+    #error-banner {
+      display: none;
+      width: 100%;
+      max-width: var(--content-width);
+      margin-bottom: 2rem;
+      padding: 1rem 1.25rem;
+      border-left: 3px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, var(--paper));
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    #error-banner.visible { display: block; }
+
+    .error-title {
+      font-family: var(--font-ui);
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.3rem;
+    }
+
+    .error-msg {
+      font-family: var(--font-ui);
+      font-size: 0.82rem;
+      color: var(--ink-secondary);
+      line-height: 1.5;
+    }
+
+    /* ─── Global drag overlay (replace while file is loaded) ───── */
+    #global-drag-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: color-mix(in srgb, var(--paper) 88%, transparent);
+      backdrop-filter: blur(2px);
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1rem;
+      pointer-events: none;
+    }
+
+    #global-drag-overlay.active { display: flex; }
+
+    .overlay-ring {
+      width: 120px;
+      height: 120px;
+      border: 2px dashed var(--accent);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+
+    .overlay-label {
+      font-family: var(--font-ui);
+      font-size: 0.85rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    /* ─── Rendered Content ──────────────────────────────────────── */
+    #content-area {
+      display: none;
+      width: 100%;
+    }
+
+    #content-area.visible { display: block; }
+
+    .content-meta {
+      width: 100%;
+      max-width: var(--content-width);
+      margin: 0 auto 2.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .meta-filename {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .meta-badge {
+      font-family: var(--font-ui);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: var(--paper-raised);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 0.2rem 0.5rem;
+    }
+
+    /* ─── Markdown Typography ───────────────────────────────────── */
+    .prose {
+      width: 100%;
+      max-width: var(--content-width);
+      margin: 0 auto;
+      font-family: var(--font-serif);
+      font-size: 1rem;
+      line-height: 1.85;
+      color: var(--ink);
+    }
+
+    /* Headings */
+    .prose h1,
+    .prose h2,
+    .prose h3,
+    .prose h4,
+    .prose h5,
+    .prose h6 {
+      font-family: var(--font-serif);
+      font-weight: 600;
+      color: var(--ink);
+      line-height: 1.25;
+      margin-top: 2.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .prose h1 { font-size: 2rem;   letter-spacing: -0.02em; margin-top: 0; }
+    .prose h2 { font-size: 1.45rem; letter-spacing: -0.01em; margin-top: 3rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+    .prose h3 { font-size: 1.2rem; }
+    .prose h4 { font-size: 1rem; font-weight: 600; }
+    .prose h5 { font-size: 0.9rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+    .prose h6 { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+
+    /* Paragraph & spacing */
+    .prose p { margin-bottom: 1.4rem; }
+    .prose p:last-child { margin-bottom: 0; }
+
+    /* Links */
+    .prose a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      transition: color var(--transition);
+    }
+    .prose a:hover { color: var(--accent-hover); }
+
+    /* Strong & em */
+    .prose strong { font-weight: 600; }
+    .prose em { font-style: italic; }
+
+    /* Blockquote — signature element */
+    .prose blockquote {
+      margin: 2rem 0;
+      padding: 0.25rem 0 0.25rem 1.5rem;
+      border-left: 2px solid var(--accent);
+      color: var(--ink-secondary);
+      font-style: italic;
+    }
+
+    .prose blockquote p { margin-bottom: 0.5rem; }
+    .prose blockquote p:last-child { margin-bottom: 0; }
+
+    /* Lists */
+    .prose ul,
+    .prose ol {
+      padding-left: 1.5rem;
+      margin-bottom: 1.4rem;
+    }
+
+    .prose ul { list-style: disc; }
+    .prose ol { list-style: decimal; }
+    .prose li { margin-bottom: 0.35rem; line-height: 1.75; }
+    .prose li > ul,
+    .prose li > ol { margin-top: 0.35rem; margin-bottom: 0.35rem; }
+
+    /* Task lists (GFM) */
+    .prose ul.contains-task-list { list-style: none; padding-left: 0.25rem; }
+    .prose .task-list-item { display: flex; align-items: flex-start; gap: 0.5rem; }
+    .prose .task-list-item input[type="checkbox"] {
+      margin-top: 0.35rem;
+      accent-color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    /* Horizontal rule */
+    .prose hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 3rem 0;
+    }
+
+    /* Inline code */
+    .prose :not(pre) > code {
+      font-family: var(--font-mono);
+      font-size: 0.82em;
+      background: var(--code-bg);
+      color: var(--ink);
+      padding: 0.15em 0.4em;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+
+    /* Code blocks */
+    .prose pre {
+      margin: 1.75rem 0;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      overflow-x: auto;
+      background: var(--code-bg) !important;
+    }
+
+    .prose pre code {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      line-height: 1.7;
+      background: transparent !important;
+      border: none !important;
+      padding: 1.25rem 1.5rem !important;
+      display: block;
+    }
+
+    /* Tables (GFM) */
+    .prose table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.75rem 0;
+      font-size: 0.9rem;
+    }
+
+    .prose thead tr {
+      border-bottom: 2px solid var(--border);
+    }
+
+    .prose th {
+      padding: 0.6rem 0.85rem;
+      text-align: left;
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .prose td {
+      padding: 0.6rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .prose tbody tr:last-child td { border-bottom: none; }
+
+    /* Images */
+    .prose img {
+      max-width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+      margin: 1.5rem 0;
+      display: block;
+    }
+
+    /* Strikethrough (GFM) */
+    .prose del { color: var(--muted); }
+
+    /* ─── Scrollbar ─────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* ─── Focus ─────────────────────────────────────────────────── */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* ─── Reduced Motion ────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+
+    /* ─── Responsive ────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      html { font-size: 16px; }
+      main { padding: 2rem 1.25rem 4rem; }
+      .chrome { padding: 0 1.25rem; }
+      .prose h1 { font-size: 1.65rem; }
+      .prose h2 { font-size: 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Chrome ─────────────────────────────────────────────────── -->
+  <header class="chrome" role="banner">
+    <span class="chrome-wordmark">Markdown Reader</span>
+    <div class="chrome-actions">
+      <button class="chrome-upload-btn" id="chrome-upload-btn" aria-label="Open a new markdown file" title="Open new file">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12h10M8 3v7M5 6l3-3 3 3"/>
+        </svg>
+        Open file
+      </button>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle colour theme">
+        <!-- Moon -->
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/>
+        </svg>
+        <!-- Sun -->
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1"  x2="12" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22"  x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1"  y1="12" x2="3"  y2="12"/>
+          <line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main ───────────────────────────────────────────────────── -->
+  <main id="main" role="main">
+
+    <!-- Empty state drop zone -->
+    <div id="drop-zone"
+         role="button"
+         tabindex="0"
+         aria-label="Drop zone. Click or drag a markdown file here to open it."
+         aria-describedby="drop-sub">
+      <!-- Upload icon -->
+      <svg class="drop-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="6" y="8" width="36" height="38" rx="3"/>
+        <path d="M14 20h20M14 28h20M14 36h12"/>
+        <path d="M31 4v10h10L31 4z"/>
+      </svg>
+      <p class="drop-label">Drop a markdown file here</p>
+      <p class="drop-sub" id="drop-sub">
+        or <strong>click to browse</strong> — accepts <code style="font-family:var(--font-mono);font-size:0.78rem;">.md</code> and <code style="font-family:var(--font-mono);font-size:0.78rem;">.markdown</code>
+      </p>
+      <input type="file" id="file-input" accept=".md,.markdown,text/markdown,text/plain" aria-hidden="true" tabindex="-1" />
+    </div>
+
+    <!-- Error banner -->
+    <div id="error-banner" role="alert" aria-live="assertive">
+      <p class="error-title">Unable to render file</p>
+      <p class="error-msg" id="error-msg"></p>
+    </div>
+
+    <!-- Rendered content -->
+    <div id="content-area" aria-label="Rendered document" aria-live="polite">
+      <div class="content-meta">
+        <span class="meta-filename" id="meta-filename"></span>
+        <span class="meta-badge">Markdown</span>
+      </div>
+      <article class="prose" id="prose-output"></article>
+    </div>
+
+  </main>
+
+  <!-- Global drag overlay (shown over rendered content) -->
+  <div id="global-drag-overlay" aria-hidden="true">
+    <div class="overlay-ring">
+      <svg width="40" height="40" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M24 34V14M14 24l10-10 10 10"/>
+      </svg>
+    </div>
+    <span class="overlay-label">Drop to replace</span>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      /* ── State ─────────────────────────────────────────────── */
+      let fileLoaded = false;
+      let dragCounter = 0; // track enter/leave pairs
+
+      /* ── DOM refs ──────────────────────────────────────────── */
+      const html          = document.documentElement;
+      const dropZone      = document.getElementById('drop-zone');
+      const fileInput     = document.getElementById('file-input');
+      const errorBanner   = document.getElementById('error-banner');
+      const errorMsg      = document.getElementById('error-msg');
+      const contentArea   = document.getElementById('content-area');
+      const proseOutput   = document.getElementById('prose-output');
+      const metaFilename  = document.getElementById('meta-filename');
+      const chromeUpload  = document.getElementById('chrome-upload-btn');
+      const themeToggle   = document.getElementById('theme-toggle');
+      const globalOverlay = document.getElementById('global-drag-overlay');
+      const hljsLight     = document.getElementById('hljs-light-theme');
+      const hljsDark      = document.getElementById('hljs-dark-theme');
+
+      /* ── marked configuration ──────────────────────────────── */
+      marked.setOptions({
+        gfm: true,
+        breaks: false,
+        pedantic: false,
+      });
+
+      /* ── Theme ─────────────────────────────────────────────── */
+      const storedTheme = localStorage.getItem('md-reader-theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initTheme   = storedTheme || (prefersDark ? 'dark' : 'light');
+      applyTheme(initTheme);
+
+      themeToggle.addEventListener('click', () => {
+        const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        localStorage.setItem('md-reader-theme', next);
+      });
+
+      function applyTheme(theme) {
+        html.dataset.theme = theme;
+        if (theme === 'dark') {
+          hljsLight.disabled = true;
+          hljsDark.disabled  = false;
+        } else {
+          hljsDark.disabled  = true;
+          hljsLight.disabled = false;
+        }
+      }
+
+      /* ── File processing ───────────────────────────────────── */
+      function processFile(file) {
+        hideError();
+
+        // Validate file type
+        const validExts  = ['.md', '.markdown'];
+        const validTypes = ['text/markdown', 'text/x-markdown', 'text/plain'];
+        const nameLower  = file.name.toLowerCase();
+        const hasValidExt  = validExts.some(e => nameLower.endsWith(e));
+        const hasValidType = validTypes.includes(file.type);
+
+        if (!hasValidExt && !hasValidType) {
+          showError(`"${file.name}" doesn't appear to be a Markdown file. Please upload a .md or .markdown file.`);
+          return;
+        }
+
+        if (file.size === 0) {
+          showError(`"${file.name}" is empty. Please upload a Markdown file with content.`);
+          return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+          const raw = e.target.result;
+          renderMarkdown(raw, file.name);
+        };
+
+        reader.onerror = () => {
+          showError(`There was a problem reading "${file.name}". The file may be corrupted or inaccessible.`);
+        };
+
+        reader.readAsText(file, 'UTF-8');
+      }
+
+      function renderMarkdown(raw, filename) {
+        let html_output;
+
+        try {
+          html_output = marked.parse(raw);
+        } catch (err) {
+          showError(`Rendering failed: ${err.message || 'The file could not be parsed as Markdown.'}`);
+          return;
+        }
+
+        if (!html_output || html_output.trim() === '') {
+          showError(`"${filename}" produced no renderable content. The file may contain only whitespace or unsupported syntax.`);
+          return;
+        }
+
+        // Write to DOM
+        proseOutput.innerHTML = html_output;
+        metaFilename.textContent = filename;
+
+        // Syntax highlight
+        proseOutput.querySelectorAll('pre code').forEach(block => {
+          hljs.highlightElement(block);
+        });
+
+        // Show content, hide drop zone
+        dropZone.style.display    = 'none';
+        contentArea.classList.add('visible');
+        chromeUpload.classList.add('visible');
+        fileLoaded = true;
+
+        // Scroll to top of content
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      /* ── Error helpers ─────────────────────────────────────── */
+      function showError(msg) {
+        errorMsg.textContent = msg;
+        errorBanner.classList.add('visible');
+
+        // If no file was previously loaded, keep drop zone visible
+        if (!fileLoaded) {
+          dropZone.style.display = '';
+          contentArea.classList.remove('visible');
+        }
+      }
+
+      function hideError() {
+        errorBanner.classList.remove('visible');
+        errorMsg.textContent = '';
+      }
+
+      /* ── Drop Zone interactions (empty state) ──────────────── */
+      dropZone.addEventListener('click', () => fileInput.click());
+
+      dropZone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) processFile(file);
+        fileInput.value = ''; // reset so same file can be re-uploaded
+      });
+
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) processFile(file);
+      });
+
+      /* ── Chrome "Open file" button ─────────────────────────── */
+      chromeUpload.addEventListener('click', () => fileInput.click());
+
+      /* ── Global drag-and-drop (replace while file loaded) ──── */
+
+      // We track dragenter/dragleave with a counter to handle child element events
+      document.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        if (!fileLoaded) return;
+        dragCounter++;
+        if (dragCounter === 1) globalOverlay.classList.add('active');
+      });
+
+      document.addEventListener('dragleave', () => {
+        if (!fileLoaded) return;
+        dragCounter--;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          globalOverlay.classList.remove('active');
+        }
+      });
+
+      document.addEventListener('dragover', (e) => {
+        e.preventDefault(); // required to allow drop
+      });
+
+      document.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        globalOverlay.classList.remove('active');
+
+        if (!fileLoaded) return; // handled by drop zone directly
+
+        const file = e.dataTransfer.files[0];
+        if (file) processFile(file);
+      });
+
+    })();
+  </script>
+</body>
+</html>
